@@ -1,0 +1,144 @@
+_schema-version: 3.3.0
+ID: myFirstCapApp
+description: A simple CAP project.
+version: 1.0.0
+modules:
+  - name: myFirstCapApp-srv
+    type: nodejs
+    path: gen/srv
+    requires:
+      - name: myFirstCapApp-db
+      - name: uaa_myFirstCapApp
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    parameters:
+      buildpack: nodejs_buildpack
+      instances: 1
+    build-parameters:
+      builder: npm-ci
+  - name: myFirstCapApp-db-deployer
+    type: hdb
+    path: gen/db
+    requires:
+      - name: myFirstCapApp-db
+    parameters:
+      buildpack: nodejs_buildpack
+  - name: myFirstCapApp-destination-content
+    type: com.sap.application.content
+    requires:
+      - name: myFirstCapApp-destination-service
+        parameters:
+          content-target: true
+      - name: myFirstCapApp_html_repo_host
+        parameters:
+          service-key:
+            name: myFirstCapApp_html_repo_host-key
+      - name: uaa_myFirstCapApp
+        parameters:
+          service-key:
+            name: uaa_myFirstCapApp-key
+    parameters:
+      content:
+        instance:
+          destinations:
+            - Name: firstCapRouter_myFirstCapApp_html_repo_host
+              ServiceInstanceName: myFirstCapApp-html5-app-host-service
+              ServiceKeyName: myFirstCapApp_html_repo_host-key
+              sap.cloud.service: firstCapRouter
+            - Authentication: OAuth2UserTokenExchange
+              Name: firstCapRouter_uaa_myFirstCapApp
+              ServiceInstanceName: myFirstCapApp-xsuaa-service
+              ServiceKeyName: uaa_myFirstCapApp-key
+              sap.cloud.service: firstCapRouter
+          existing_destinations_policy: ignore
+    build-parameters:
+      no-source: true
+  - name: myFirstCapApp-app-content
+    type: com.sap.application.content
+    path: .
+    requires:
+      - name: myFirstCapApp_html_repo_host
+        parameters:
+          content-target: true
+    build-parameters:
+      build-result: resources
+      requires:
+        - artifacts:
+            - comfirstcapuifirstcapui.zip
+          name: comfirstcapuifirstcapui
+          target-path: resources/
+  - name: comfirstcapuifirstcapui
+    type: html5
+    path: app/firstcapui
+    build-parameters:
+      build-result: dist
+      builder: custom
+      commands:
+        - npm install
+        - npm run build:cf
+      supported-platforms:
+        []
+resources:
+  - name: myFirstCapApp-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+  - name: myFirstCapApp-destination-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      config:
+        HTML5Runtime_enabled: true
+        init_data:
+          instance:
+            destinations:
+              - Authentication: NoAuthentication
+                Name: ui5
+                ProxyType: Internet
+                Type: HTTP
+                URL: https://ui5.sap.com
+              - Authentication: NoAuthentication
+                HTML5.DynamicDestination: true
+                HTML5.ForwardAuthToken: true
+                Name: srv-api
+                ProxyType: Internet
+                Type: HTTP
+                URL: ~{srv-api/srv-url}
+            existing_destinations_policy: update
+        version: 1.0.0
+      service: destination
+      service-name: myFirstCapApp-destination-service
+      service-plan: lite
+    requires:
+      - name: srv-api
+  - name: myFirstCapApp_html_repo_host
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-name: myFirstCapApp-html5-app-host-service
+      service-plan: app-host
+  - name: uaa_myFirstCapApp
+    type: org.cloudfoundry.managed-service
+    parameters:
+      config:
+        oauth2-configuration:
+          credential-types:
+            - binding-secret
+            - x509
+        tenant-mode: dedicated
+        xsappname: myFirstCapApp-${org}-${space}
+      path: ./xs-security.json
+      service: xsuaa
+      service-name: myFirstCapApp-xsuaa-service
+      service-plan: application
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npx cds build --production
